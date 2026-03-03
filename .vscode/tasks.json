@@ -1,0 +1,64 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "CPU: Create Work Lib",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/${input:stageName}/sim && vlib work && vmap work work",
+            "options": {"shell": {"executable": "cmd.exe", "args": ["/c"]}},
+            "problemMatcher": []
+        },
+        {
+            "label": "CPU: Compile Current Stage",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/${input:stageName}/sim && vlog -sv -work work ../src/*.sv",
+            "options": {"shell": {"executable": "cmd.exe", "args": ["/c"]}},
+            "group": {"kind": "build", "isDefault": true},
+            "problemMatcher": {"owner": "systemverilog", "fileLocation": "absolute", "pattern": {"regexp": "^(.*):(\\d+):\\s+(Error|Warning):\\s+(.*)$", "file": 1, "line": 2, "severity": 3, "message": 4}},
+            "dependsOn": "CPU: Create Work Lib"
+        },
+        {
+            "label": "CPU: Run CLI Simulation",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/${input:stageName}/sim && vsim -c -voptargs=+acc work.testbench -do \"run -all; quit\"",
+            "options": {"shell": {"executable": "cmd.exe", "args": ["/c"]}},
+            "group": "test",
+            "dependsOn": "CPU: Compile Current Stage",
+            "presentation": {"echo": true, "reveal": "always", "focus": false, "panel": "shared"}
+        },
+        {
+            "label": "CPU: Run GUI Simulation",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/${input:stageName}/sim && vsim -voptargs=+acc work.testbench -do \"do wave.do; run -all\"",
+            "options": {"shell": {"executable": "cmd.exe", "args": ["/c"]}},
+            "group": "test",
+            "dependsOn": "CPU: Compile Current Stage",
+            "isBackground": true,
+            "presentation": {"echo": true, "reveal": "never", "focus": false, "panel": "shared"}
+        },
+        {
+            "label": "CPU: Clean Current Stage",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/${input:stageName}/sim && if exist work rmdir /s /q work && if exist transcript del transcript && if exist vsim.wlf del vsim.wlf",
+            "options": {"shell": {"executable": "cmd.exe", "args": ["/c"]}},
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "stageName",
+            "description": "选择开发阶段",
+            "default": "stage1_pipeline_frame",
+            "type": "pickString",
+            "options": [
+                "single_cycle",
+                "stage1_pipeline_frame",
+                "stage2_alu_instructions",
+                "stage3_branch_memory",
+                "stage4_hazard_handling",
+                "stage5_test_debug",
+                "stage6_interrupt_io"
+            ]
+        }
+    ]
+}
