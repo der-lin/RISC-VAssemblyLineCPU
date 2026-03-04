@@ -33,7 +33,7 @@
             "options": {"shell": {"executable": "cmd.exe", "args": ["/c"]}},
             "group": "test",
             "dependsOn": "CPU: Compile Current Stage",
-            "isBackground": true,
+            //"isBackground": true,
             "presentation": {"echo": true, "reveal": "never", "focus": false, "panel": "shared"}
         },
         {
@@ -48,10 +48,10 @@
         {
             "id": "stageName",
             "description": "选择开发阶段",
-            "default": "stage1_pipeline_frame",
+            "default": "rvsingle",
             "type": "pickString",
             "options": [
-                "single_cycle",
+                "rvsingle",
                 "stage1_pipeline_frame",
                 "stage2_alu_instructions",
                 "stage3_branch_memory",
