@@ -125,8 +125,8 @@ module top(input  logic        clk, reset,
   // instantiate processor and memories
   riscvsingle rvsingle(clk, reset, PC, Instr, MemWrite, DataAdr, 
                        WriteData, ReadData);
-  imem imem(PC, Instr);
-  dmem dmem(clk, MemWrite, DataAdr, WriteData, ReadData);
+  imem imem(PC, Instr);                                    // instruction memory
+  dmem dmem(clk, MemWrite, DataAdr, WriteData, ReadData);  // data memory
 endmodule
 
 module riscvsingle(input  logic        clk, reset,
@@ -140,10 +140,12 @@ module riscvsingle(input  logic        clk, reset,
   logic [1:0] ResultSrc, ImmSrc;
   logic [2:0] ALUControl;
 
+  // produce control signals
   controller c(Instr[6:0], Instr[14:12], Instr[30], Zero,
                ResultSrc, MemWrite, PCSrc,
                ALUSrc, RegWrite, Jump,
                ImmSrc, ALUControl);
+  // finish reading, computing, transmissing and writing data under the control of control signals
   datapath dp(clk, reset, ResultSrc, PCSrc,
               ALUSrc, RegWrite,
               ImmSrc, ALUControl,
@@ -165,8 +167,11 @@ module controller(input  logic [6:0] op,
   logic [1:0] ALUOp;
   logic       Branch;
 
+  // main decoder for analyzing opcode to make sure which type of instruction it is and generate control signals accordingly
   maindec md(op, ResultSrc, MemWrite, Branch,
              ALUSrc, RegWrite, Jump, ImmSrc, ALUOp);
+
+  // ALU decoder for analyzing funct3 and funct7 to generate ALU control signals
   aludec  ad(op[5], funct3, funct7b5, ALUOp, ALUControl);
 
   assign PCSrc = Branch & Zero | Jump;
@@ -258,6 +263,8 @@ module datapath(input  logic        clk, reset,
   mux3 #(32)  resultmux(ALUResult, ReadData, PCPlus4, ResultSrc, Result);
 endmodule
 
+// 32x32-bit register file with two read ports and one write port
+// What amazing!
 module regfile(input  logic        clk, 
                input  logic        we3, 
                input  logic [ 4:0] a1, a2, a3, 

@@ -20,7 +20,7 @@
         {
             "label": "CPU: Run CLI Simulation",
             "type": "shell",
-            "command": "cd ${workspaceFolder}/${input:stageName}/sim && vsim -c -voptargs=+acc work.testbench -do \"run -all; quit\"",
+            "command": "cd ${workspaceFolder}/${input:stageName}/sim && vsim -c -voptargs=+acc work.testbench",
             "options": {"shell": {"executable": "cmd.exe", "args": ["/c"]}},
             "group": "test",
             "dependsOn": "CPU: Compile Current Stage",
