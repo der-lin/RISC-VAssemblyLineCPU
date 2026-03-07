@@ -52,7 +52,7 @@
             "type": "pickString",
             "options": [
                 "rvsingle",
-                "stage1_pipeline_frame",
+                "Phase_1_FiveStagePipeline",
                 "stage2_alu_instructions",
                 "stage3_branch_memory",
                 "stage4_hazard_handling",

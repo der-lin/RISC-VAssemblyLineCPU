@@ -88,3 +88,6 @@ First of all, we make sure Modules belonging to each stage of `IF / ID / EXE / M
 
     *  `reusultmux`: Data selector written back to register file.
     *  `regfile`: Register File (Write the result into rd).
+
+### 2. Change the code and devide the CPU into five stage.
+
