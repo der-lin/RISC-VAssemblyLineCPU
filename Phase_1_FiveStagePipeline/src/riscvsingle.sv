@@ -123,59 +123,148 @@ module top(input  logic        clk, reset,
   logic [31:0] PC, Instr, ReadData;
   
   // instantiate processor and memories
-  riscvpipeline rvpipeline(clk, reset, PC, Instr, MemWrite, DataAdr, 
-                       WriteData, ReadData);
+  riscvpipeline rv(clk, reset, PC, Instr, MemWrite, DataAdr, 
+                    WriteData, ReadData);
   // Follow the principle of "Separating computation and storage"
   imem imem(PC, Instr);                                    // instruction memory
   dmem dmem(clk, MemWrite, DataAdr, WriteData, ReadData);  // data memory
 endmodule
 
 module riscvpipeline(input  logic        clk, reset,
-                   output logic [31:0] PC,
-                   input  logic [31:0] Instr,
-                   output logic        MemWrite,
-                   output logic [31:0] ALUResult, WriteData,
-                   input  logic [31:0] ReadData);
+                     output logic [31:0] PC,
+                     input  logic [31:0] Instr,
+                     output logic        MemWrite,
+                     output logic [31:0] DataAdr, WriteData,
+                     input  logic [31:0] ReadData);
 
-  logic       ALUSrc, RegWrite, Jump, Zero;
-  logic [1:0] ResultSrc, ImmSrc;
-  logic [2:0] ALUControl;
+// --- Internal Wires ---
 
-  // produce control signals
-  controller c(Instr[6:0], Instr[14:12], Instr[30], Zero,
-               ResultSrc, MemWrite, PCSrc,
-               ALUSrc, RegWrite, Jump,
-               ImmSrc, ALUControl);
-  // finish reading, computing, transmissing and writing data under the control of control signals
-  datapath dp(clk, reset, ResultSrc, PCSrc,
-              ALUSrc, RegWrite,
-              ImmSrc, ALUControl,
-              Zero, PC, Instr,
-              ALUResult, WriteData, ReadData);
+// IF Stage
+logic [31:0] PCNextF, PCPlus4F;  // PCTarget is putted in the Exe stage
+logic        PCSrcE;
+
+// ID Stage
+logic [31:0] PCD, PCPlus4D, InstrD;
+logic [1:0]  ResultSrcD, ImmSrcD;
+logic        ALUSrcD, RegWriteD, MemWriteD, JumpD, BranchD;
+logic [2:0]  ALUControlD;
+logic [31:0] SrcAD, ReadData2D, ImmExtD; //PCTargetD; For now, let's design it in a simple pipeline
+
+// EXE Stage
+logic [31:0] SrcAE, ReadData2E, ImmExtE, PCPlus4E, PCE;
+logic [4:0]  rs1E, rs2E, rdE;
+logic [1:0]  ResultSrcE;
+logic        ALUSrcE, RegWriteE, MemWriteE, JumpE, BranchE;
+logic [2:0]  ALUControlE;
+logic [31:0] SrcBE, ALUResultE;
+logic        ZeroE;
+logic [31:0] PCTargetE;    // PCSrc is produced in the Exe Stage
+
+// MEM Stage
+logic [31:0] ALUResultM, WriteDataM, PCPlus4M;
+logic [4:0]  rdM;
+logic [1:0]  ResultSrcM;
+logic        RegWriteM, MemWriteM;
+
+// WB Stage
+logic [31:0] ALUResultW, ReadDataW, PCPlus4W;
+logic [4:0]  rdW;
+logic [1:0]  ResultSrcW;
+logic        RegWriteW;
+logic [31:0] ResultW;
+
+// --- Pipeline ---
+if_id if_id(clk, reset,
+             PC, PCPlus4F, Instr,
+             PCD, PCPlus4D, InstrD);
+
+id_exe id_exe(clk, reset,
+              ResultSrcD, ALUSrcD, RegWriteD, MemWriteD, JumpD, BranchD,
+              ALUControlD,
+              SrcAD, ReadData2D, PCD, ImmExtD, PCPlus4D,
+              rs1E, rs2E, rdE,
+
+              ResultSrcE, ALUSrcE, RegWriteE, MemWriteE, JumpE, BranchE,
+              ALUControlE,
+              SrcAE, ReadData2E, PCE, ImmExtE, PCPlus4E,
+              rs1E, rs2E, rdE);
+
+exe_mem exe_mem(clk, reset,
+               RegWriteE, MemWriteE,
+               ResultSrcE,
+               ALUResultE, ReadData2E, PCPlus4E,
+               rdE,
+
+               RegWriteM, MemWriteM,
+               ResultSrcM,
+               ALUResultM, WriteDataM, PCPlus4M,
+               rdM);
+
+mem_wb mem_wb(clk, reset,
+              RegWriteM,
+              ResultSrcM,
+              ALUResultM, ReadDataM, PCPlus4M,
+              rdM,
+
+              RegWriteW,
+              ResultSrcW,
+              ALUResultW, ReadDataW, PCPlus4W,
+              rdW);
+
+// --- IF ---
+flopr #(32) pcreg(clk, reset, PCNextF, PC);
+adder       pcadd4(PC, 32'd4, PCPlus4F);
+mux2 #(32)  pcmux(PCPlus4F, PCTargetE, PCSrcE, PCNextF);
+
+// --- ID ---
+controller controller(InstrD[6:0], Instr[14:12], Instr[30],
+                      ResultSrcD, MemWriteD, BranchD, ALUSrcD, RegWriteD, JumpD,
+                      ImmSrcD, ALUControlD);
+// Watch out the Write-before-Read hazard in the register file, and we can change the writing into signal as negedge clk.
+regfile     rf(clk, RegWriteW, InstrD[19:15], InstrD[24:20], 
+                 rdW, ResultW, SrcAD, ReadData2D);
+extend      ext(InstrD[31:7], ImmSrcD, ImmExtD);
+
+// --- EXE ---
+adder       pcbranch(PCE, ImmExtE, PCTargetE);
+mux2 #(32)  srcbmux(ReadData2E, ImmExtE, ALUSrcE, SrcBE);
+alu         alu(SrcAE, SrcBE, ALUControlE, ALUResultE, ZeroE);
+assign PCSrcE = BranchE & ZeroE | JumpE;
+
+// --- MEM ---
+// Uniform output to the deme in the top module
+assign DataAdr = ALUResultM;
+assign WriteData = WriteDataM;
+assign MemWrite = MemWriteM;
+
 endmodule
 
 module controller(input  logic [6:0] op,
                   input  logic [2:0] funct3,
                   input  logic       funct7b5,
-                  input  logic       Zero,
+                  // remove the Zero input
                   output logic [1:0] ResultSrc,
                   output logic       MemWrite,
-                  output logic       PCSrc, ALUSrc,
+                  // Delete PCSrc，and Branch output
+                  output logic       Branch, ALUSrc,
                   output logic       RegWrite, Jump,
                   output logic [1:0] ImmSrc,
-                  output logic [2:0] ALUControl);
+                  output logic [2:0] ALUControl
+);
 
   logic [1:0] ALUOp;
-  logic       Branch;
 
-  // main decoder for analyzing opcode to make sure which type of instruction it is and generate control signals accordingly
-  maindec md(op, ResultSrc, MemWrite, Branch,
+  // main decoder: parse instruction type.
+  maindec md(op, 
+             ResultSrc, MemWrite, Branch,
              ALUSrc, RegWrite, Jump, ImmSrc, ALUOp);
 
-  // ALU decoder for analyzing funct3 and funct7 to generate ALU control signals
+  // ALU decoder: generate ALU control signals.
   aludec  ad(op[5], funct3, funct7b5, ALUOp, ALUControl);
 
-  assign PCSrc = Branch & Zero | Jump;
+  // Delete assign PCSrc = Branch & Zero | Jump;
+  // The controller's responsibility is only to generate control signals, and the datapath should be responsible for generating PCSrc. So we can move the logic of PCSrc to the Exe stage, and it will be generated by BranchE, ZeroE, and JumpE.
+  // The controller's work ends here, and its sole responsibility is to generate 'static' control signals.
 endmodule
 
 module maindec(input  logic [6:0] op,
@@ -228,40 +317,6 @@ module aludec(input  logic       opb5,
                  default:   ALUControl = 3'bxxx; // ???
                endcase
     endcase
-endmodule
-
-module datapath(input  logic        clk, reset,
-                input  logic [1:0]  ResultSrc, 
-                input  logic        PCSrc, ALUSrc,
-                input  logic        RegWrite,
-                input  logic [1:0]  ImmSrc,
-                input  logic [2:0]  ALUControl,
-                output logic        Zero,
-                output logic [31:0] PC,
-                input  logic [31:0] Instr,
-                output logic [31:0] ALUResult, WriteData,
-                input  logic [31:0] ReadData);
-
-  logic [31:0] PCNext, PCPlus4, PCTarget;
-  logic [31:0] ImmExt;
-  logic [31:0] SrcA, SrcB;
-  logic [31:0] Result;
-
-  // next PC logic
-  flopr #(32) pcreg(clk, reset, PCNext, PC); 
-  adder       pcadd4(PC, 32'd4, PCPlus4);
-  adder       pcaddbranch(PC, ImmExt, PCTarget);
-  mux2 #(32)  pcmux(PCPlus4, PCTarget, PCSrc, PCNext);
- 
-  // register file logic
-  regfile     rf(clk, RegWrite, Instr[19:15], Instr[24:20], 
-                 Instr[11:7], Result, SrcA, WriteData);
-  extend      ext(Instr[31:7], ImmSrc, ImmExt);
-
-  // ALU logic
-  mux2 #(32)  srcbmux(WriteData, ImmExt, ALUSrc, SrcB);
-  alu         alu(SrcA, SrcB, ALUControl, ALUResult, Zero);
-  mux3 #(32)  resultmux(ALUResult, ReadData, PCPlus4, ResultSrc, Result);
 endmodule
 
 // 32x32-bit register file with two read ports and one write port

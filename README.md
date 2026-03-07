@@ -91,3 +91,5 @@ First of all, we make sure Modules belonging to each stage of `IF / ID / EXE / M
 
 ### 2. Change the code and devide the CPU into five stage.
 
+* Put the progress computing PCTarget in ID to optimize the pipeline?
+* Change the controller module and put the progress of computing PCSrc in Exe.
