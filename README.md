@@ -110,7 +110,7 @@ endmodule
 
     1. For the ID stage `rf` module, I choose to write date in the falling edge of the clock (`negedge clk`). And this change is made to resolve the `RAW` hazard (Read After Write).
     * You can imagine the scenarior: the `old instruction` is in `WB` phase, writing the result back to register x1; the `new instruction` is in `ID` phase, reading the data from register x1.You can see that they are operating the same register. 
-    * **If we still use the posedge clk in the WB phase, writing result and reading data will happen at the same time.** And the new instruction usually read the old data in ID (not the one we actually need).
+    * `If we still use the posedge clk in the WB phase, writing result and reading data will happen at the same time.` And the new instruction usually read the old data in ID (not the one we actually need).
     * If we choose the negedge clk for writing back, we can see:
     `0 -> 1 -> 1`: The instruction keeps going along;
     `1 -> 0`: The reasult selected in WB can be writed into register in advance;
@@ -141,3 +141,17 @@ assign ReadDataM = ReadData;
 
 * 3. Change the controller module and put the progress of computing PCSrc in Exe in accord with the classic RISC-V pipeline CPU.
 
+## The Phase Two: Add I\R instructions
+
+添加设置常量指令: I1={LUI, AUIPC}  设置常量指令，2条
+添加I-type算术逻辑运算指令: I2={ADDI, SLTI, SLTIU, XORI, ANDI, ALLI, SRLI, SRALI, SRAI} I型指令，9条
+添加R-type算术逻辑运算指令: I3={ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND} R型指令，10条
+
+### 1. Add lui and auipc
+
+Add a new type of ImmExt: U-type: `imm = {Instr[31:20], 12'b0}`and implement the add-operation of lui and auipc.
+
+* `lui`: lui rd, upim -> rd = {upimm, 12'b0}. (load upper immediate)
+* `auipc`: auipc rd, upimm -> rd = {upimm, 12'b0} + PC. (add upper immediate to PC)
+
+* 1. 
