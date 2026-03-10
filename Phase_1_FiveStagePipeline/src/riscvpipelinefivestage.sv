@@ -161,7 +161,7 @@ logic        ZeroE;
 logic [31:0] PCTargetE;    // PCSrc is produced in the Exe Stage
 
 // MEM Stage
-logic [31:0] ALUResultM, WriteDataM, PCPlus4M;
+logic [31:0] ALUResultM, ReadDataM, PCPlus4M, WriteDataM;
 logic [4:0]  rdM;
 logic [1:0]  ResultSrcM;
 logic        RegWriteM, MemWriteM;
@@ -182,7 +182,7 @@ id_exe id_exe(clk, reset,
               ResultSrcD, ALUSrcD, RegWriteD, MemWriteD, JumpD, BranchD,
               ALUControlD,
               SrcAD, ReadData2D, PCD, ImmExtD, PCPlus4D,
-              rs1E, rs2E, rdE,
+              InstrD[19:15], InstrD[24:20], InstrD[11:7],
 
               ResultSrcE, ALUSrcE, RegWriteE, MemWriteE, JumpE, BranchE,
               ALUControlE,
@@ -217,7 +217,7 @@ adder       pcadd4(PC, 32'd4, PCPlus4F);
 mux2 #(32)  pcmux(PCPlus4F, PCTargetE, PCSrcE, PCNextF);
 
 // --- ID ---
-controller controller(InstrD[6:0], Instr[14:12], Instr[30],
+controller controller(InstrD[6:0], InstrD[14:12], InstrD[30],
                       ResultSrcD, MemWriteD, BranchD, ALUSrcD, RegWriteD, JumpD,
                       ImmSrcD, ALUControlD);
 // Watch out the Write-before-Read hazard in the register file, and we can change the writing into signal as negedge clk.
@@ -236,6 +236,10 @@ assign PCSrcE = BranchE & ZeroE | JumpE;
 assign DataAdr = ALUResultM;
 assign WriteData = WriteDataM;
 assign MemWrite = MemWriteM;
+assign ReadDataM = ReadData; // This is the output of the dmem, and it should be assigned to the ReadDataM which is the input of the mem_wb pipeline register.
+
+// --- WB ---
+mux3 #(32) resmux(ALUResultW, ReadDataW, PCPlus4W, ResultSrcW, ResultW);
 
 endmodule
 
@@ -245,7 +249,7 @@ module controller(input  logic [6:0] op,
                   // remove the Zero input
                   output logic [1:0] ResultSrc,
                   output logic       MemWrite,
-                  // Delete PCSrc，and Branch output
+                  // Delete PCSrc, and Branch output
                   output logic       Branch, ALUSrc,
                   output logic       RegWrite, Jump,
                   output logic [1:0] ImmSrc,
@@ -289,7 +293,8 @@ module maindec(input  logic [6:0] op,
       7'b1100011: controls = 11'b0_10_0_0_00_1_01_0; // beq
       7'b0010011: controls = 11'b1_00_1_0_00_0_10_0; // I-type ALU
       7'b1101111: controls = 11'b1_11_0_0_10_0_00_1; // jal
-      default:    controls = 11'bx_xx_x_x_xx_x_xx_x; // non-implemented instruction
+      default:    controls = 11'b0_00_0_0_00_0_00_0; 
+      //default:    controls = 11'bx_xx_x_x_xx_x_xx_x; // non-implemented instruction
     endcase
 endmodule
 
@@ -334,7 +339,7 @@ module regfile(input  logic        clk,
   // write third port on rising edge of clock (A3/WD3/WE3)
   // register 0 hardwired to 0
 
-  always_ff @(posedge clk)
+  always_ff @(negedge clk)
     if (we3) rf[a3] <= wd3;	
 
   // Where is the data in the register file?
@@ -398,7 +403,7 @@ module imem(input  logic [31:0] a,
   logic [31:0] RAM[63:0];
 
   initial
-      $readmemh("riscvtest.txt",RAM);
+      $readmemh("sim/riscvtest.txt",RAM);  // add the way sim
 
   assign rd = RAM[a[31:2]]; // word aligned
 endmodule
@@ -461,7 +466,7 @@ endmodule
 // ID->Exe pipeline register
 module id_exe(input logic        clk, reset,
               // Control Signals
-              input logic [1:0]  ResuiltSrcD,
+              input logic [1:0]  ResultSrcD,
               input logic        ALUSrcD, RegWriteD, MemWriteD, JumpD, BranchD,
               input logic [2:0]  ALUControlD,
               // Data
@@ -469,20 +474,20 @@ module id_exe(input logic        clk, reset,
               // rs1 and rs2 for forwarding
               input logic [4:0]  rs1D, rs2D, rdD,
               
-              output logic [1:0]  ResuiltSrcE,
+              output logic [1:0]  ResultSrcE,
               output logic        ALUSrcE, RegWriteE, MemWriteE, JumpE, BranchE,
               output logic [2:0]  ALUControlE,
               output logic [31:0] SrcAE, ReadData2E, PCE, ImmExtE, PCPlus4E,
               output logic [4:0]  rs1E, rs2E, rdE);
 
   // Control
-  flopr #(2)   resultsrc_id_exe(clk, reset, ResuiltSrcD, ResuiltSrcE);
+  flopr #(2)   resultsrc_id_exe(clk, reset, ResultSrcD, ResultSrcE);
   flopr #(1)   alusrc_id_exe(clk, reset, ALUSrcD, ALUSrcE);
   flopr #(1)   regwrite_id_exe(clk, reset, RegWriteD, RegWriteE);
   flopr #(1)   memwrite_id_exe(clk, reset, MemWriteD, MemWriteE);
   flopr #(1)   jump_id_exe(clk, reset, JumpD, JumpE);
   flopr #(1)   branch_id_exe(clk, reset, BranchD, BranchE);
-  flopr #(3)   alucontrol_id_exe(clk, reset, ALUControlD, ALUControlE);\
+  flopr #(3)   alucontrol_id_exe(clk, reset, ALUControlD, ALUControlE);
   // Data
   flopr #(32) srca_id_exe(clk, reset, SrcAD, SrcAE);
   flopr #(32) readdata2_id_exe(clk, reset, ReadData2D, ReadData2E);

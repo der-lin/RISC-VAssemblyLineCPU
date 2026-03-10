@@ -91,5 +91,53 @@ First of all, we make sure Modules belonging to each stage of `IF / ID / EXE / M
 
 ### 2. Change the code and devide the CPU into five stage.
 
-* Put the progress computing PCTarget in ID to optimize the pipeline?
-* Change the controller module and put the progress of computing PCSrc in Exe.
+* **BASICCHANGE**
+* 1. Set the stage1_stage2 modules to reflect the transmission of the signals and data at each stage of the pipeline. Take if_id module for example:
+```systemverilog
+module if_id(input  logic        clk, reset,
+             input  logic [31:0] PCF, PCPlus4F, InstrF,
+             output logic [31:0] PCD, PCPlus4D, InstrD);
+
+  flopr #(32) pc_if_id(clk, reset, PCF, PCD);
+  flopr #(32) pcplus4_if_id(clk, reset, PCPlus4F, PCPlus4D);
+  flopr #(32) instr_if_id(clk, reset, InstrF, InstrD);
+
+endmodule
+```
+* 2. To satisfy the transmission, I choose to set the necessary `logics` for every stage.
+
+* 3. Give up the original datapath module, and implement its functionality in the riscvpipeline module. The overall design remains unchanged, although some details have been altered. They are as follows:
+
+    1. For the ID stage `rf` module, I choose to write date in the falling edge of the clock (`negedge clk`). And this change is made to resolve the `RAW` hazard (Read After Write).
+    * You can imagine the scenarior: the `old instruction` is in `WB` phase, writing the result back to register x1; the `new instruction` is in `ID` phase, reading the data from register x1.You can see that they are operating the same register. 
+    * **If we still use the posedge clk in the WB phase, writing result and reading data will happen at the same time.** And the new instruction usually read the old data in ID (not the one we actually need).
+    * If we choose the negedge clk for writing back, we can see:
+    `0 -> 1 -> 1`: The instruction keeps going along;
+    `1 -> 0`: The reasult selected in WB can be writed into register in advance;
+    `second half of the cycle (0)`: Because the read operation is combinational logic, it immediately detects changes within the register. Before the next rising edge arrives, the ID stage has already reliably read the newly written value.
+
+    2. Mainly assign values to the Mem stage: 
+    ```systemverilog
+    assign DataAdr = ALUResultM;
+    assign WriteData = WriteDataM;
+    assign MemWrite = MemWriteM;
+    assign ReadDataM = ReadData;
+    ```
+    * For the instruction lw (lw rd imm(rs1)) and sw (sw rs2 imm(rs1)), ALUResultM is the address for reading data (lw) or writing data (sw) in the Data Memory. So we have the code: `assign DataAdr = ALUResultM;`
+    * The operation of reading data in Data Memory occurs in dmem module and ReadData from dmem is an input for riscvpipeline.
+
+* **CHALLENGE**
+* 1. Put the progress computing PCTarget in ID to optimize the pipeline?
+* 2. In the regfile module, think about avoiding the data conflicts caused by writing before reading within the same cycle.
+
+* **VECTORY**
+* 1. In the progree of Mem in riscvpipeline-module, adding the code:
+```systemverilog
+assign ReadDataM = ReadData;
+```
+    make sure data read back from memory can be transferred to write-back stage in the time of running `lw` code, otherwise, register-file will get X and all of the computing-logic will be polluted.
+
+* 2. In the maindec module, I have changed the parsing instructions of the default-case (machine code that can't be recognized by the current code) from `all illegal values x` to `all zero`.
+
+* 3. Change the controller module and put the progress of computing PCSrc in Exe in accord with the classic RISC-V pipeline CPU.
+
