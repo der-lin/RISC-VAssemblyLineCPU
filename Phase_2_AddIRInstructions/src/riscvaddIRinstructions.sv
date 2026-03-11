@@ -148,7 +148,7 @@ logic [31:0] PCD, PCPlus4D, InstrD;
 logic [1:0]  ResultSrcD;
 logic [2:0]  ImmSrcD;
 logic        ALUSrcD, RegWriteD, MemWriteD, JumpD, BranchD;
-logic [2:0]  ALUControlD;
+logic [3:0]  ALUControlD;
 logic [31:0] ReadData1D, SrcAD, ReadData2D, ImmExtD; //PCTargetD; For now, let's design it in a simple pipeline
 logic [1:0]  SrcASrcD; // For auipc and lui, we need to select the source of SrcA, which can be either zero or PC.
 
@@ -157,7 +157,7 @@ logic [31:0] SrcAE, ReadData2E, ImmExtE, PCPlus4E, PCE;
 logic [4:0]  rs1E, rs2E, rdE;
 logic [1:0]  ResultSrcE;
 logic        ALUSrcE, RegWriteE, MemWriteE, JumpE, BranchE;
-logic [2:0]  ALUControlE;
+logic [3:0]  ALUControlE;
 logic [31:0] SrcBE, ALUResultE;
 logic        ZeroE;
 logic [31:0] PCTargetE;    // PCSrc is produced in the Exe Stage
@@ -258,7 +258,7 @@ module controller(input  logic [6:0] op,
                   output logic       Branch, ALUSrc,
                   output logic       RegWrite, Jump,
                   output logic [2:0] ImmSrc,
-                  output logic [2:0] ALUControl,
+                  output logic [3:0] ALUControl,
                   output logic [1:0] SrcASrc
 );
 
@@ -311,24 +311,43 @@ module aludec(input  logic       opb5,
               input  logic [2:0] funct3,
               input  logic       funct7b5, 
               input  logic [1:0] ALUOp,
-              output logic [2:0] ALUControl);
+              output logic [3:0] ALUControl);
 
   logic  RtypeSub;
   assign RtypeSub = funct7b5 & opb5;  // TRUE for R-type subtract instruction
 
+  // Define new ALUControls for the new instructions of I-type and R-type.
+  localparam ALU_ADD = 4'b0000;
+  localparam ALU_SUB = 4'b0001;
+  localparam ALU_AND = 4'b0010;
+  localparam ALU_OR  = 4'b0011;
+  localparam ALU_XOR = 4'b0100;
+  localparam ALU_SLT = 4'b0101;
+  localparam ALU_SLL = 4'b0110;
+  localparam ALU_SLTU = 4'b0111;
+  localparam ALU_SRL = 4'b1000;
+  localparam ALU_SRA = 4'b1001;
+
   always_comb
     case(ALUOp)
-      2'b00:                ALUControl = 3'b000; // addition
-      2'b01:                ALUControl = 3'b001; // subtraction
+      2'b00:                ALUControl = ALU_ADD; // addition
+      2'b01:                ALUControl = ALU_SUB; // subtraction
       default: case(funct3) // R-type or I-type ALU
                  3'b000:  if (RtypeSub) 
-                            ALUControl = 3'b001; // sub
+                            ALUControl = ALU_SUB; // sub
                           else          
-                            ALUControl = 3'b000; // add, addi
-                 3'b010:    ALUControl = 3'b101; // slt, slti
-                 3'b110:    ALUControl = 3'b011; // or, ori
-                 3'b111:    ALUControl = 3'b010; // and, andi
-                 default:   ALUControl = 3'bxxx; // ???
+                            ALUControl = ALU_ADD; // add, addi
+                 3'b010:    ALUControl = ALU_SLT; // slt, slti
+                 3'b011:    ALUControl = ALU_SLTU; // sltu, sltiu
+                 3'b110:    ALUControl = ALU_OR; // or, ori
+                 3'b111:    ALUControl = ALU_AND; // and, andi
+                 3'b001:    ALUControl = ALU_SLL; // sll, slli
+                 3'b100:    ALUControl = ALU_XOR; // xor, xori
+                 3'b101:   if (funct7b5) 
+                            ALUControl = ALU_SRA; // sra, srai
+                          else          
+                            ALUControl = ALU_SRL; // srl, srli
+                 default:   ALUControl = 4'bxxxx; // ???
                endcase
     endcase
 endmodule
@@ -432,7 +451,7 @@ module dmem(input  logic        clk, we,
 endmodule
 
 module alu(input  logic [31:0] a, b,
-           input  logic [2:0]  alucontrol,
+           input  logic [3:0]  alucontrol,
            output logic [31:0] result,
            output logic        zero);
 
@@ -445,18 +464,21 @@ module alu(input  logic [31:0] a, b,
   assign isAddSub = ~alucontrol[2] & ~alucontrol[1] |
                     ~alucontrol[1] & alucontrol[0];
 
-  always_comb
+  always_comb begin  
     case (alucontrol)
-      3'b000:  result = sum;         // add
-      3'b001:  result = sum;         // subtract
-      3'b010:  result = a & b;       // and
-      3'b011:  result = a | b;       // or
-      3'b100:  result = a ^ b;       // xor
-      3'b101:  result = sum[31] ^ v; // slt
-      3'b110:  result = a << b[4:0]; // sll
-      3'b111:  result = a >> b[4:0]; // srl
-      default: result = 32'bx;
+      4'b0000:  result = sum;         // add, addi
+      4'b0001:  result = sum;         // sub
+      4'b0010:  result = a & b;       // and, andi
+      4'b0011:  result = a | b;       // or, ori
+      4'b0100:  result = a ^ b;       // xor, xori
+      4'b0101:  result = ($signed(a) < $signed(b)) ? 32'd1 : 32'd0;       // slt, slti (signed)
+      4'b0111:  result = (a < b) ? 32'd1 : 32'd0;       // sltu, sltiu (unsigned) Beacause a and b are declared as logic so that comparing their size will be an unsigned comparison.
+      4'b0110:  result = a << b[4:0]; // sll, slli
+      4'b1000:  result = a >> b[4:0]; // srl, srli
+      4'b1001:  result = $signed(a) >>> b[4:0]; // sra, srai
+
     endcase
+  end
 
   assign zero = (result == 32'b0);
   assign v = ~(alucontrol[0] ^ a[31] ^ b[31]) & (a[31] ^ sum[31]) & isAddSub;
@@ -479,7 +501,7 @@ module id_exe(input logic        clk, reset,
               // Control Signals
               input logic [1:0]  ResultSrcD,
               input logic        ALUSrcD, RegWriteD, MemWriteD, JumpD, BranchD,
-              input logic [2:0]  ALUControlD,
+              input logic [3:0]  ALUControlD,
               // Data
               input logic [31:0] SrcAD, ReadData2D, PCD, ImmExtD, PCPlus4D,
               // rs1 and rs2 for forwarding
@@ -487,7 +509,7 @@ module id_exe(input logic        clk, reset,
               
               output logic [1:0]  ResultSrcE,
               output logic        ALUSrcE, RegWriteE, MemWriteE, JumpE, BranchE,
-              output logic [2:0]  ALUControlE,
+              output logic [3:0]  ALUControlE,
               output logic [31:0] SrcAE, ReadData2E, PCE, ImmExtE, PCPlus4E,
               output logic [4:0]  rs1E, rs2E, rdE);
 
@@ -498,7 +520,7 @@ module id_exe(input logic        clk, reset,
   flopr #(1)   memwrite_id_exe(clk, reset, MemWriteD, MemWriteE);
   flopr #(1)   jump_id_exe(clk, reset, JumpD, JumpE);
   flopr #(1)   branch_id_exe(clk, reset, BranchD, BranchE);
-  flopr #(3)   alucontrol_id_exe(clk, reset, ALUControlD, ALUControlE);
+  flopr #(4)   alucontrol_id_exe(clk, reset, ALUControlD, ALUControlE);
   // Data
   flopr #(32) srca_id_exe(clk, reset, SrcAD, SrcAE);
   flopr #(32) readdata2_id_exe(clk, reset, ReadData2D, ReadData2E);

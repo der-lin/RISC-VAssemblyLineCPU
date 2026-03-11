@@ -89,7 +89,7 @@ First of all, we make sure Modules belonging to each stage of `IF / ID / EXE / M
     *  `reusultmux`: Data selector written back to register file.
     *  `regfile`: Register File (Write the result into rd).
 
-### 2. Change the code and devide the CPU into five stage.
+### 2. Change the code and devide the CPU into five stage
 
 * **BASICCHANGE**
 * 1. Set the stage1_stage2 modules to reflect the transmission of the signals and data at each stage of the pipeline. Take if_id module for example:
@@ -157,3 +157,83 @@ Add a new type of ImmExt: U-type: `imm = {Instr[31:20], 12'b0}`and implement the
 * 1. Expand the ImmSrc signals to 3 bits, get [2:0]ImmSrc and ImmExt will choose the U-type when ImmSrc == 3'b100.
 * 2. Add a new satic signal `SrcASrc` and add a new selection selecting the `SrcA` within the help of SrcASrc:
     According to the definition for mux3-module, I create three different scenarios for SrcA: (1) `If SrcASrc == 2'b00`, SrcA = ReadData1D = original SrcAD; (2) `If SrcASrc == 2'b01`, SrcA = 32'b0 (for lui); (3) `If SrcASrc == 2'b10`, SrcA = PCD (for auipc).
+
+### 2. Add more instructions of I-type and R-type
+
+Now the aludec-module only decodes a little instructions as follows: 
+```systemverilog
+  always_comb
+    case(ALUOp)
+      2'b00:                ALUControl = 3'b000; // addition
+      2'b01:                ALUControl = 3'b001; // subtraction
+      default: case(funct3) // R-type or I-type ALU
+                 3'b000:  if (RtypeSub) 
+                            ALUControl = 3'b001; // sub
+                          else          
+                            ALUControl = 3'b000; // add, addi
+                 3'b010:    ALUControl = 3'b101; // slt, slti
+                 3'b110:    ALUControl = 3'b011; // or, ori
+                 3'b111:    ALUControl = 3'b010; // and, andi
+                 default:   ALUControl = 3'bxxx; // ???
+               endcase
+    endcase
+```
+And we are going to add instructions as: `sltiu, xori, slli, srli, srai` and  `sll, sltu, xor, sra, srl`
+
+* `slt`: slt rd, rs1: rs2 -> rd = -> (rs1 < rs2). (set less than)
+* `sll`: sll rd, rs1, rs2 -> rd = rs1 << rs2(4:0). (shift left logical)
+* `sra & srl`: sra rd, rs1, rs2 -> rd = rs1 >>> rs2(4:0).(shift right arithmetic) & srl rd, rs1, rs2 -> rd = rs1 >> rs2(4:0). (shift right logical)
+
+```systemverilog
+module aludec(input  logic       opb5,
+              input  logic [2:0] funct3,
+              input  logic       funct7b5, 
+              input  logic [1:0] ALUOp,
+              output logic [3:0] ALUControl);
+
+  logic  RtypeSub;
+  assign RtypeSub = funct7b5 & opb5;  // TRUE for R-type subtract instruction
+
+  // Define new ALUControls for the new instructions of I-type and R-type.
+  localparam ALU_ADD = 4'b0000;
+  localparam ALU_SUB = 4'b0001;
+  localparam ALU_AND = 4'b0010;
+  localparam ALU_OR  = 4'b0011;
+  localparam ALU_XOR = 4'b0100;
+  localparam ALU_SLT = 4'b0101;
+  localparam ALU_SLL = 4'b0110;
+  localparam ALU_SLTU = 4'b0111;
+  localparam ALU_SRL = 4'b1000;
+  localparam ALU_SRA = 4'b1001;
+
+  always_comb
+    case(ALUOp)
+      2'b00:                ALUControl = ALU_ADD; // addition
+      2'b01:                ALUControl = ALU_SUB; // subtraction
+      default: case(funct3) // R-type or I-type ALU
+                 3'b000:  if (RtypeSub) 
+                            ALUControl = ALU_SUB; // sub
+                          else          
+                            ALUControl = ALU_ADD; // add, addi
+                 3'b010:    ALUControl = ALU_SLT; // slt, slti
+                 3'b011:    ALUControl = ALU_SLTU; // sltu, sltiu
+                 3'b110:    ALUControl = ALU_OR; // or, ori
+                 3'b111:    ALUControl = ALU_AND; // and, andi
+                 3'b001:    ALUControl = ALU_SLL; // sll, slli
+                 3'b100:    ALUControl = ALU_XOR; // xor, xori
+                 3'b101:   if (funct7b5) 
+                            ALUControl = ALU_SRA; // sra, srai
+                          else          
+                            ALUControl = ALU_SRL; // srl, srli
+                 default:   ALUControl = 4'bxxxx; // ???
+               endcase
+    endcase
+endmodule
+```
+
+* 1. A and b are declared as logic so that comparing their size will be an unsigned comparison. Based on this rule, the way we take to implement sll(signed) and sll(unsigned) is:
+```systemverilog
+      4'b0101:  result = ($signed(a) < $signed(b)) ? 32'd1 : 32'd0;       // slt, slti (signed)
+      4'b0111:  result = (a < b) ? 32'd1 : 32'd0;       // sltu, sltiu (unsigned
+```
+* 2. To distingguish between sra and srl, we can observe the `funct7` of the two kinds of instructions, and find that `sra` is `01000000` and `srl` is `0000000`. Therefore, we can use `funct7b5` (the sixth bit) to determine whether ALUControl signal points to sra or srl.

@@ -1,34 +1,31 @@
-# Test for LUI and AUIPC instructions.
-# The goal is to write the value 25 to memory address 100.
-# This is verified by the testbench in riscvaddIRinstructions.sv.
+# riscvtest.s
+# Test for RISC-V Five-Stage Pipeline Processor
+#
+# This test is based on the machine code from sim/riscvtest.txt
 
-.globl _start
-
-_start:
-    # Instruction at 0x00
-    # Load 0 into x5 using LUI. This tests LUI with a zero immediate.
-    # Although 'mv x5, x0' would be equivalent, this specifically tests LUI.
-    lui x5, 0           # x5 = 0
-
-    # Instruction at 0x04
-    # Add 25 to x5. Now x5 holds the value to be stored.
-    addi x5, x5, 25     # x5 = 25
-
-    # Instruction at 0x08
-    # Use AUIPC to get the current PC value into a register.
-    # PC-relative addressing test.
-    auipc x6, 0         # x6 = PC + 0 = 0x8
-
-    # Instruction at 0x0C
-    # Adjust x6 to become the target address 100 (0x64).
-    # We need to add 100 - 8 = 92.
-    addi x6, x6, 92     # x6 = 8 + 92 = 100
-
-    # Instruction at 0x10
-    # Store the value in x5 (25) at the address in x6 (100).
-    sw x5, 0(x6)        # Memory[100] = 25
-
-    # Instruction at 0x14
-    # Infinite loop to end the simulation.
-loop:
-    beq x0, x0, loop    # branch to self
+#       RISC-V Assembly         Description                       Address   Machine Code
+main:   addi x1, x0, 10         # x1 = 10                         0         00a00093
+        nop                     #                                 4         00000013
+        nop                     #                                 8         00000013
+        addi x2, x0, 20         # x2 = 20                         C         01400113
+        nop                     #                                 10        00000013
+        nop                     #                                 14        00000013
+        sub x3, x2, x1          # x3 = 20 - 10 = 10               18        401101b3
+        nop                     #                                 1C        00000013
+        nop                     #                                 20        00000013
+        slti x4, x3, 11         # x4 = (10 < 11) ? 1 : 0          24        00b1a213
+        nop                     #                                 28        00000013
+        nop                     #                                 2C        00000013
+        slli x5, x4, 4          # x5 = 1 << 4 = 16                30        00421293
+        nop                     #                                 34        00000013
+        nop                     #                                 38        00000013
+        addi x6, x0, 9          # x6 = 9                          3C        00900313
+        nop                     #                                 40        00000013
+        nop                     #                                 44        00000013
+        add x5, x5, x6          # x5 = 16 + 9 = 25                48        006282b3
+        nop                     #                                 4C        00000013
+        nop                     #                                 50        00000013
+        sw x5, 100(x0)          # mem[100] = 25                   54        06502223
+done:   beq x0, x0, done        # infinite loop                   58        00000063
+        nop                     #                                 5C        00000013
+        nop                     #                                 60        00000013
