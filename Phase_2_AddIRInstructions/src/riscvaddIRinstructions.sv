@@ -149,7 +149,7 @@ logic [1:0]  ResultSrcD;
 logic [2:0]  ImmSrcD;
 logic        ALUSrcD, RegWriteD, MemWriteD, JumpD, BranchD;
 logic [2:0]  ALUControlD;
-logic [31:0] SrcAD, ReadData2D, ImmExtD; //PCTargetD; For now, let's design it in a simple pipeline
+logic [31:0] ReadData1D, SrcAD, ReadData2D, ImmExtD; //PCTargetD; For now, let's design it in a simple pipeline
 logic [1:0]  SrcASrcD; // For auipc and lui, we need to select the source of SrcA, which can be either zero or PC.
 
 // EXE Stage
@@ -224,11 +224,11 @@ controller controller(InstrD[6:0], InstrD[14:12], InstrD[30],
                       ImmSrcD, ALUControlD, SrcASrcD);
 // Watch out the Write-before-Read hazard in the register file, and we can change the writing into signal as negedge clk.
 regfile     rf(clk, RegWriteW, InstrD[19:15], InstrD[24:20], 
-                 rdW, ResultW, SrcAD, ReadData2D);
+                 rdW, ResultW, ReadData1D, ReadData2D);
 extend      ext(InstrD[31:7], ImmSrcD, ImmExtD);
 // For auipc and lui, we need to select the source of SrcA, which can be either zero or PC.
 // When SrcASrcD is 00, SrcAD = SrcA; When SrcASrcD is 01, SrcAD = 0; When SrcASrcD is 10, SrcAD = PCD. 
-mux3 #(32) srcamux(SrcAD, 32'b0, PCD, SrcASrcD, SrcAD);
+mux3 #(32) srcamux(ReadData1D, 32'b0, PCD, SrcASrcD, SrcAD);
 
 // --- EXE ---
 adder       pcbranch(PCE, ImmExtE, PCTargetE);
@@ -258,7 +258,8 @@ module controller(input  logic [6:0] op,
                   output logic       Branch, ALUSrc,
                   output logic       RegWrite, Jump,
                   output logic [2:0] ImmSrc,
-                  output logic [2:0] ALUControl
+                  output logic [2:0] ALUControl,
+                  output logic [1:0] SrcASrc
 );
 
   logic [1:0] ALUOp;
@@ -266,7 +267,7 @@ module controller(input  logic [6:0] op,
   // main decoder: parse instruction type.
   maindec md(op, 
              ResultSrc, MemWrite, Branch,
-             ALUSrc, RegWrite, Jump, ImmSrc, ALUOp);
+             ALUSrc, RegWrite, Jump, ImmSrc, ALUOp, SrcASrc);
 
   // ALU decoder: generate ALU control signals.
   aludec  ad(op[5], funct3, funct7b5, ALUOp, ALUControl);
@@ -362,7 +363,7 @@ module adder(input  [31:0] a, b,
 endmodule
 
 module extend(input  logic [31:7] instr,
-              input  logic [1:0]  immsrc,
+              input  logic [2:0]  immsrc,
               output logic [31:0] immext);
  
   always_comb

@@ -154,4 +154,6 @@ Add a new type of ImmExt: U-type: `imm = {Instr[31:20], 12'b0}`and implement the
 * `lui`: lui rd, upim -> rd = {upimm, 12'b0}. (load upper immediate)
 * `auipc`: auipc rd, upimm -> rd = {upimm, 12'b0} + PC. (add upper immediate to PC)
 
-* 1. 
+* 1. Expand the ImmSrc signals to 3 bits, get [2:0]ImmSrc and ImmExt will choose the U-type when ImmSrc == 3'b100.
+* 2. Add a new satic signal `SrcASrc` and add a new selection selecting the `SrcA` within the help of SrcASrc:
+    According to the definition for mux3-module, I create three different scenarios for SrcA: (1) `If SrcASrc == 2'b00`, SrcA = ReadData1D = original SrcAD; (2) `If SrcASrc == 2'b01`, SrcA = 32'b0 (for lui); (3) `If SrcASrc == 2'b10`, SrcA = PCD (for auipc).

@@ -1,24 +1,34 @@
-# riscvtest.s
-# Test for RISC-V Five-Stage Pipeline Processor
-#
-# This test is based on the machine code from sim/riscvtest.txt
+# Test for LUI and AUIPC instructions.
+# The goal is to write the value 25 to memory address 100.
+# This is verified by the testbench in riscvaddIRinstructions.sv.
 
-#       RISC-V Assembly         Description                       Address   Machine Code
-main:   addi x1, x0, 10         # x1 = 10                         0         00A00093
-        nop                     #                                 4         00000013
-        nop                     #                                 8         00000013
-        addi x2, x0, 15         # x2 = 15                         C         00F00113
-        nop                     #                                 10        00000013
-        nop                     #                                 14        00000013
-        add x2, x1, x2          # x2 = x1 + x2 (10 + 15 = 25)     18        00208133
-        nop                     #                                 1C        00000013
-        nop                     #                                 20        00000013
-        addi x3, x0, 100        # x3 = 100                        24        06400193
-        nop                     #                                 28        00000013
-        nop                     #                                 2C        00000013
-        sw   x2, 0(x3)          # mem[100] = x2 (25)              30        0021A023
-        nop                     #                                 34        00000013
-        nop                     #                                 38        00000013
-done:   beq  x0, x0, done       # infinite loop                   3C        00000063
-        nop                     #                                 40        00000013
-        nop                     #                                 44        00000013
+.globl _start
+
+_start:
+    # Instruction at 0x00
+    # Load 0 into x5 using LUI. This tests LUI with a zero immediate.
+    # Although 'mv x5, x0' would be equivalent, this specifically tests LUI.
+    lui x5, 0           # x5 = 0
+
+    # Instruction at 0x04
+    # Add 25 to x5. Now x5 holds the value to be stored.
+    addi x5, x5, 25     # x5 = 25
+
+    # Instruction at 0x08
+    # Use AUIPC to get the current PC value into a register.
+    # PC-relative addressing test.
+    auipc x6, 0         # x6 = PC + 0 = 0x8
+
+    # Instruction at 0x0C
+    # Adjust x6 to become the target address 100 (0x64).
+    # We need to add 100 - 8 = 92.
+    addi x6, x6, 92     # x6 = 8 + 92 = 100
+
+    # Instruction at 0x10
+    # Store the value in x5 (25) at the address in x6 (100).
+    sw x5, 0(x6)        # Memory[100] = 25
+
+    # Instruction at 0x14
+    # Infinite loop to end the simulation.
+loop:
+    beq x0, x0, loop    # branch to self

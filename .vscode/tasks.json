@@ -2,42 +2,72 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "ModelSim: Initialize & Compile (Current Phase)",
+            "label": "CPU: Create Work Lib",
             "type": "shell",
-            "command": "cd ${fileDirname}/.. && if exist work (rd /s /q work) && vlib work && vmap work work && vlog src/*.sv",
-            "options": {
-                "shell": {
-                    "executable": "cmd.exe",
-                    "args": ["/c"]
-                }
-            },
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": true,
-                "panel": "shared"
-            },
-            "problemMatcher": "$gcc"
+            "command": "cd ${workspaceFolder}/${input:stageName}/sim && vlib work && vmap work work",
+            "options": {"shell": {"executable": "cmd.exe", "args": ["/c"]}},
+            "problemMatcher": []
         },
         {
-            "label": "ModelSim: Open GUI (Current Phase)",
+            "label": "CPU: Compile Current Stage",
             "type": "shell",
-            "command": "cd ${fileDirname}/.. && vsim -novopt work.testbench",
-            "options": {
-                "shell": {
-                    "executable": "cmd.exe",
-                    "args": ["/c"]
-                }
-            },
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "panel": "shared"
-            }
+            "command": "cd ${workspaceFolder}/${input:stageName}/sim && vlog -sv -work work ../src/*.sv",
+            "options": {"shell": {"executable": "cmd.exe", "args": ["/c"]}},
+            "group": {"kind": "build", "isDefault": true},
+            "problemMatcher": {"owner": "systemverilog", "fileLocation": "absolute", "pattern": {"regexp": "^(.*):(\\d+):\\s+(Error|Warning):\\s+(.*)$", "file": 1, "line": 2, "severity": 3, "message": 4}},
+            "dependsOn": "CPU: Create Work Lib"
+        },
+        {
+            "label": "CPU: Run CLI Simulation",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/${input:stageName}/sim && vsim -c -voptargs=+acc work.testbench",
+            "options": {"shell": {"executable": "cmd.exe", "args": ["/c"]}},
+            "group": "test",
+            "dependsOn": "CPU: Compile Current Stage",
+            "presentation": {"echo": true, "reveal": "always", "focus": false, "panel": "shared"}
+        },
+        {
+    "label": "CPU: Run GUI Simulation",
+    "type": "shell",
+    // 关键点：1. 使用 -gui 强制开启界面 2. 确保在 sim 目录下运行 3. 显式指定库路径
+    "command": "cd /d \"${workspaceFolder}/${input:stageName}/sim\" && vsim -gui -voptargs=\"+acc\" -L work work.testbench",
+    "options": {
+        "shell": {
+            "executable": "cmd.exe",
+            "args": ["/c"]
+        }
+    },
+    "dependsOn": "CPU: Compile Current Stage",
+    "presentation": {
+        "echo": true,
+        "reveal": "always", // 建议改为 always，这样如果报错了你能看到
+        "focus": true,
+        "panel": "shared"
+    }
+},
+        {
+            "label": "CPU: Clean Current Stage",
+            "type": "shell",
+            "command": "cd ${workspaceFolder}/${input:stageName}/sim && if exist work rmdir /s /q work && if exist transcript del transcript && if exist vsim.wlf del vsim.wlf",
+            "options": {"shell": {"executable": "cmd.exe", "args": ["/c"]}},
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "stageName",
+            "description": "选择开发阶段",
+            "default": "rvsingle",
+            "type": "pickString",
+            "options": [
+                "rvsingle",
+                "Phase_1_FiveStagePipeline",
+                "Phase_2_AddIRInstructions",
+                "stage3_branch_memory",
+                "stage4_hazard_handling",
+                "stage5_test_debug",
+                "stage6_interrupt_io"
+            ]
         }
     ]
 }

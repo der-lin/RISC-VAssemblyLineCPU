@@ -4,3 +4,7 @@
 */*.vcd
 */*.wlf
 */modelsim.ini
+**/work/
+*.mpf
+*.mti
+*.json
