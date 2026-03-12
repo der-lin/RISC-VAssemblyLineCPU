@@ -237,3 +237,123 @@ endmodule
       4'b0111:  result = (a < b) ? 32'd1 : 32'd0;       // sltu, sltiu (unsigned
 ```
 * 2. To distingguish between sra and srl, we can observe the `funct7` of the two kinds of instructions, and find that `sra` is `01000000` and `srl` is `0000000`. Therefore, we can use `funct7b5` (the sixth bit) to determine whether ALUControl signal points to sra or srl.
+
+* 3. During the test, what I need to do is pay attention to `rdW`, `ResultW`, `ALUResultM` and `WriteDataM` (the last two signal and data are necessary for `slt` and `sltu`).
+
+## The Phase Three: Add more I (lb, lh ...) \ J \ B instructions
+
+添加跳转指令: I5={JAL, JALR, BEQ, BNE, BLT, BGE, BLTU, BGEU}	分支跳转指令，8条
+添加访存指令: I5={LB, LH, LW, LBU, LHU, SB, SH, SW}          访存指令，8条
+
+### 1. Add more Branch Jump Instructions
+
+Before we start the progree, let's determine the specific meaning of each branch jump instruction.
+
+* `jal`: 1101111 --- -------: jal rd, label (jump and link): PC = JTA   rd = PC(previous) + 4
+* `jalr`: 1100111 000 -------: jalr rd, rs1, imm (jump and link register): PC = rs1 + SignExt(imm)   rd = PC(previous) + 4
+* `beq`: 1100011 000 -------: beq rs1, rs2, label (branch if =): if (rs1 == rs2), PC = BTA
+* `bne`: 1100011 001 -------: bne rs1, rs2, label (branch if !=)
+* `blt`: 1100011 100 -------: blt rs1, rs2, label (branch if <)
+* `bge`: 1100011 101 -------: bge rs1, rs2, label (branch if >=)
+* `bltu`: 1100011 110 -------: bltu rs1, rs2, label (branch if < unsigned)
+* `bgeu`: 1100011 111 -------: bgeu rs1, rs2, label (branch if >= unsigned)
+
+* 1. And we are forced to recgnize a fact: when the Branch Jumping happens, the target address to jump to actually is produced from adding between PC and imm (except for the jalr command, it's target-address = rs1 + SignExt(imm)). 
+* For this reason, we need to add a new control signal `JumpReg` to the `maindec-module`, which play an essential role on selecting a more suitable `PCTarget` from `ALUResult` and `PCImmResult`.
+* So we add a new mux2 into Exe stage:
+
+```systemverilog
+7'b1100111: controls = 15'b1_000_1_0_10_0_00_1_00_1; // jalr: ImmSrc = 000 -> I-Type, JumpReg = 1
+```
+```systemverilog
+// Mainly for jalr (PC = rs1 + Signed(imm)). Other Branch Jump instructions will use the PCImmResultE as the target address.
+mux2 #(32)  pctargetmux(PCImmResultE, ALUResultE, JumpRegE, PCTargetE);
+```
+* 2. Now, let's watch the B-type instructions. Based on the machine code above, we can clearly see that their instruction opcodes are all the same. And the operations required by these six instructions can be devided into three groups. It means that the ALUOP given by maindec-module cna't satisfy the computation requirements.
+* However, their funct3 codes are different. It's a good way to tell further in aludec-module.
+* So we make maindec-module give B-type instructions `ALUOP = 2'b11` and make the further telling in aludec-module. 
+
+```systemverilog
+7'b1100011: controls = 15'b0_010_0_0_00_1_11_0_00_0; // B-type for further telling
+```
+```systemverilog
+module aludec(input  logic       opb5,
+              input  logic [2:0] funct3,
+              input  logic       funct7b5, 
+              input  logic [1:0] ALUOp,
+              output logic [3:0] ALUControl);
+
+  // ... (localparam definitions remain the same) ...
+
+  always_comb
+    case(ALUOp)
+      2'b00:  ALUControl = ALU_ADD; // lw, sw, addi
+      2'b01:  ALUControl = ALU_SUB; // beq (Original design)
+      // For R-type and I-type ALU instructions
+      2'b10: case(funct3)
+                 3'b000: ALUControl = RtypeSub ? ALU_SUB : ALU_ADD;
+                 3'b010: ALUControl = ALU_SLT;
+                 // ... other cases
+                 default: ALUControl = 4'bxxxx;
+             endcase
+      // NEW: For Branch instructions
+      2'b11: case(funct3)
+                 3'b000, 3'b001: ALUControl = ALU_SUB;  // BEQ, BNE
+                 3'b100, 3'b101: ALUControl = ALU_SLT;  // BLT, BGE
+                 3'b110, 3'b111: ALUControl = ALU_SLTU; // BLTU, BGEU
+                 default: ALUControl = 4'bxxxx;
+             endcase
+      default: ALUControl = 4'bxxxx;
+    endcase
+endmodule
+```
+
+* Then based on the jump conditions of each B-type instructions, we can obtain the following code:
+```systemverilog
+always_comb
+  case (funct3)
+    3'b000: BranchTaken = Zero;  // beq
+    3'b001: BranchTaken = ~Zero; // bne
+    3'b100: BranchTaken = ALUResult0; // blt
+    3'b101: BranchTaken = ~ALUResult0; // bge
+    3'b110: BranchTaken = ALUResult0; // bltu
+    3'b111: BranchTaken = ~ALUResult0; // bgeu
+    default: BranchTaken = 1'b0;
+  endcase
+```
+
+* **ATTENTION**
+    In our RISC-V pipeline CPU, the address strictly adhere to four-byte alignment, which can also be seem from imem-module (Instruction Memory) :
+    ```systemverilog
+    module imem(input  logic [31:0] a,
+            output logic [31:0] rd);
+
+        logic [31:0] RAM[63:0];
+
+        initial
+            $readmemh("sim/riscvtest.txt",RAM);  // add the way sim
+
+        assign rd = RAM[a[31:2]]; // word aligned
+    endmodule
+    ```
+
+    Therefore, we must perform the `four-byte alignment` to the ALUResult = rs1 + imm from the jalr instruction.
+    We can choose the way as follow:
+    ```systemverilog
+    assign JarlTargetE = ALUResultE & 32'hfffffffc;
+    ```
+
+### 2. Add cache instructions
+
+On this step, we are going to expand lw and sw to `lb, lh, lw, lbu, lhu and sb, sh, sw` and let's see the machine code of these cache instructions.
+
+* `lb`: 0000011 000 -------: lb rd, imm(rs1) (load byte): rd = SignExt([Address][7:0])
+* `lh`: 0000011 001 -------: lh rd, imm(rs1) (load half): rd = SignExt([Address][15:0])
+* `lw`: 0000011 010 -------: lw rd, imm(rs1) (load word): rd = [Address][31:0]
+* `lbu`: 0000011 100 -------: lbu rd, imm(rs1) (load byte unsigned): rd = ZeroExt([Address][7:0])
+* `lhu`: 0000011 101 -------: lhu rd, imm(rs1) (load half unsigned): rd = ZeroExt([Address][15:0])
+
+* `sb`: 0100011 000 -------: sb rs2, imm(rs1) (store byte): [Address][7:0] = rs2[7:0]
+* `sh`: 0100011 001 -------: sh rs2, imm(rs1) (store half): [Address][15:0] = rs2[15:0]
+* `sw`: 0100011 010 -------: sw rs2, imm(rs1) (store word): [Address][31:0] = rs2[31:0]
+
