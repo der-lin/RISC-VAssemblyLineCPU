@@ -357,3 +357,73 @@ On this step, we are going to expand lw and sw to `lb, lh, lw, lbu, lhu and sb, 
 * `sh`: 0100011 001 -------: sh rs2, imm(rs1) (store half): [Address][15:0] = rs2[15:0]
 * `sw`: 0100011 010 -------: sw rs2, imm(rs1) (store word): [Address][31:0] = rs2[31:0]
 
+* **Load Instructions**
+
+To implement more Load-Instructions, it's neccessary for us to set different writing data methods based on their `funct3` machine code and represent the setting results using `LReadData`. I choose to make a module `readdata_load` to achieve this goal. The specific implementation code is as follows:
+```systemverilog
+module readdata_load (input logic [31:0] ReadDataW,
+                      input logic [2:0]  funct3W,
+                      input logic [1:0]  addr_lsb,
+
+                      output logic [31:0] LReadData);
+
+logic [31:0] shifted_data;
+
+always_comb begin
+  shifted_data = ReadDataW >> (addr_lsb * 8);
+  case (funct3W)
+    3'b000: LReadData = {{24{shifted_data[7]}}, shifted_data[7:0]};   // lb
+    3'b001: LReadData = {{16{shifted_data[15]}}, shifted_data[15:0]}; // lh
+    3'b010: LReadData = ReadDataW;  // lw
+    3'b100: LReadData = {{24{1'b0}}, shifted_data[7:0]};              // lbu
+    3'b101: LReadData = {{16{1'b0}}, shifted_data[15:0]};             // lhu
+    default: LReadData = ReadDataW;
+  endcase
+end
+
+endmodule
+```
+
+I am sure it's easy for you to understand the input `ReadDataW` and `funct3W`. What about `addr_lsb`?
+* In my code, `addr_lsb` reflects `the offset of the address of the data loaded into rd`. ( This CPU uses Little-Endian Order! ) And it's possible for us to use the offset to right_shift `(Signed OR Unsigned)` the data readed in the address ending with 00 in Data Memory to obtain the data that is actually to be loaded.
+
+* **Save Instructions**
+
+For Sava Instructions, we will do different saving based on their funct3 machine code.
+
+* `sb` (3'b000): Because sb means saving byte. For this reason, we use the passed dataadr[1:0] to represent the actual location where we are going to save data. And we should write `wd[7:0]` (WriteData[7:0]) into the location.
+* `sh` (3'b001): The instruction of sh will write half-word into the address. Therefore, what we need to do is focusing on the `dataadr[1]` and `wd[15:0]`.
+* `sw` (3'b010): This instruction is familiar to you.
+```systemverilog
+module dmem(input  logic        clk, we,
+            input  logic [31:0] dataadr, wd,
+            input  logic [2:0]  funct3,
+            output logic [31:0] readdata);
+
+  logic [31:0] RAM[63:0];
+
+  assign readdata = RAM[dataadr[31:2]]; // word aligned
+
+  always_ff @(posedge clk) begin
+    if (we) begin
+      case (funct3)
+        3'b000: begin  // sb
+          case(dataadr[1:0])
+            2'b00: RAM[dataadr[31:2]][7:0]   <= wd[7:0];
+            2'b01: RAM[dataadr[31:2]][15:8] <= wd[7:0];
+            2'b10: RAM[dataadr[31:2]][23:16] <= wd[7:0];
+            2'b11: RAM[dataadr[31:2]][31:24] <= wd[7:0];
+          endcase
+        end
+        3'b001: begin  // sh
+          if (dataadr[1]) RAM[dataadr[31:2]][31:16] <= wd[15:0];
+          else      RAM[dataadr[31:2]][15:0]  <= wd[15:0];
+        end
+        3'b010: RAM[dataadr[31:2]] <= wd;  // sw
+      endcase
+    end
+  end
+endmodule
+```
+
+* In this code, we have to pay attention to the `Four Byte Alligned` principle. The datadr[1:0] represents the offset in the word. And we only need to think about dataadr[31:2] as the address.

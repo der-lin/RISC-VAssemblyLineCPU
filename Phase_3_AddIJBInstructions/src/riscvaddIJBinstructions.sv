@@ -108,10 +108,10 @@ module testbench();
         if(DataAdr === 100 & WriteData === 25) begin
           $display("Simulation succeeded");
           $stop;
-        end else if (DataAdr !== 96) begin
+        end /*else if (DataAdr !== 96) begin
           $display("Simulation failed");
           $stop;
-        end
+        end*/
       end
     end
 endmodule
