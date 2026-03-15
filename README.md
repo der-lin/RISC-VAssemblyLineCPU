@@ -427,3 +427,31 @@ endmodule
 ```
 
 * In this code, we have to pay attention to the `Four Byte Alligned` principle. The datadr[1:0] represents the offset in the word. And we only need to think about dataadr[31:2] as the address.
+
+## The Phase Four: Deal with the Data Hazard and Control Hazard
+
+用前递技术解决数据冲突
+用冒险检测+停顿解决冲突
+控制冲突
+
+### The Data Hazard
+
+A data hazard occurs when an instruction tries to read a register that has not yet been written back by a previous instruction.
+
+* **1. Solving Data Hazards with Forwarding**
+Some data hazards can be solved by forwarding(also called bypassing) a result from the `Memory` or `Write Back` stage to a dependent instruction in the `Execute` stage. This requires adding multiplexers `in front of the ALU` to select its operands from the register file or the Mem or WB stage.
+From my perspective, forwarding is necessary when an instruction in Exe has a source register matching the destination register of an instruction in Mem or WB.To support forwarding, we can add `Hazard Unit` and `two forwarding multiplexers` as the picture in the book named DDCA.
+The hazard detection unit receives the two source registers from the instruction in Exe, `Rs1E` and `Rs2E`, and the destination registers from the instructions in Mem and WB, `RdM` and `RdW`. Of course, it also receive the `RegWrite` signals from the Mem and WB stages (RegWriteM and RegWriteW) to know whether the destination register will actually be written (take sw and beq for example, their instructions do not write results to register file and, hence, do not have their results forwarded).
+The hazard unit computes control signals for the forwarding multiplexers to choose operands from the register file or from the results in Mem or WB (actually `ALUResultM` or `ResultW`).
+And remember that `x0` is hardwired to 0 and should never be forwarded.
+What's more, the result from Mem has a priority comparing with that from WB because we need a `recent` data.
+All in all, we get the telling-logic for forwarding as follows:
+if      `((Rs1E == RdM) & RegWriteM) & (Rs1E != 0)`, then ForwardAE = 2'b10  // Forward from Mem Stage
+else if `((Rs1E == RdW) & RegWriteW) & (Rs1E != 0)`, then ForwardAE = 2'b01  // Forward from WB Stage
+else                                               , then ForwardAE = 2'b00  // No forwarding
+
+* `the simultaneity of transimmion`: think about instructions:addi x1, x2, x3; sw x1, 0(x4): sw instruction will get the forwarding result from Mem of addi in Exe, and we should pass the result to Mem stage. So, we change `exe_mem(...ReadData2E...)` to `exe_mem(...ForwardSrcBE...)`.
+
+### The Control Hazard
+
+A control hazard occurs when the decision of what instruction to fetch next has not been made by the time the fetch takes place.
