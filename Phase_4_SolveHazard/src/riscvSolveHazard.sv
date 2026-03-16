@@ -77,6 +77,7 @@ logic [31:0] ReadData1D, SrcAD, ReadData2D, ImmExtD; //PCTargetD; For now, let's
 logic [1:0]  SrcASrcD; // For auipc and lui, we need to select the source of SrcA, which can be either zero or PC.
 logic        JumpRegD; // For jalr, we need to set the JumpReg signal to 1. And the selection use this signal in Exe.
 logic        StallD;
+logic        FlushD;
 
 // EXE Stage
 logic [31:0] SrcAE, ReadData2E, ImmExtE, PCPlus4E, PCE;
@@ -113,7 +114,7 @@ logic [31:0] LReadDataW;  // For load instructions
 logic [2:0]  funct3W;     // For telling load instructions in details, such as lb, lh and lw.
 
 // --- Pipeline ---
-if_id if_id(clk, reset, ~StallD,
+if_id if_id(clk, reset, FlushD, ~StallD,
              PC, PCPlus4F, Instr,
              PCD, PCPlus4D, InstrD);
 
@@ -174,7 +175,7 @@ extend      ext(InstrD[31:7], ImmSrcD, ImmExtD);
 // For auipc and lui, we need to select the source of SrcA, which can be either zero or PC.
 // When SrcASrcD is 00, SrcAD = SrcA; When SrcASrcD is 01, SrcAD = 0; When SrcASrcD is 10, SrcAD = PCD. 
 mux3 #(32) srcamux(ReadData1D, 32'b0, PCD, SrcASrcD, SrcAD);
-stalltell  stalltell(InstrD[19:15], InstrD[24:20], rdE, ResultSrcE[0], StallF, StallD, FlushE);
+hazardunit  hazardunit(InstrD[19:15], InstrD[24:20], rdE, ResultSrcE[0], PCSrcE, StallF, StallD, FlushD, FlushE);
 
 // --- EXE ---
 forwarding  forwarding(rs1E, rs2E, rdM, rdW, RegWriteM, RegWriteW,
@@ -399,6 +400,17 @@ module floprc #(parameter WIDTH = 8)
     else            q <= d;
 endmodule
 
+module floprcen #(parameter WIDTH = 8)
+                (input  logic             clk, reset, clear, en, 
+                 input  logic [WIDTH-1:0] d,
+                 output logic [WIDTH-1:0] q);
+
+  always_ff @(posedge clk, posedge reset)
+    if (reset)      q <= 0;
+    else if (clear) q <= 0;
+    else if (en)    q <= d;       
+endmodule
+
 module mux2 #(parameter WIDTH = 8)
              (input  logic [WIDTH-1:0] d0, d1, 
               input  logic             s, 
@@ -492,13 +504,18 @@ module alu(input  logic [31:0] a, b,
 endmodule
 
 // IF->ID pipeline register
-module if_id(input  logic        clk, reset, en,
+module if_id(input  logic        clk, reset, clear, en,
              input  logic [31:0] PCF, PCPlus4F, InstrF,
              output logic [31:0] PCD, PCPlus4D, InstrD);
 
-  flopren #(32) pc_if_id(clk, reset, en, PCF, PCD);
-  flopren #(32) pcplus4_if_id(clk, reset, en, PCPlus4F, PCPlus4D);
-  flopren #(32) instr_if_id(clk, reset, en, InstrF, InstrD);
+  floprcen #(32) pc_if_id(clk, reset, clear, en, PCF, PCD);
+  floprcen #(32) pcplus4_if_id(clk, reset, clear, en, PCPlus4F, PCPlus4D);
+  //floprcen #(32) instr_if_id(clk, reset, clear, en, InstrF, InstrD);
+  always_ff @(posedge clk, posedge reset) begin
+    if (reset)          InstrD <= 32'h00000013;
+    else if (clear)     InstrD <= 32'h00000013; // add NOP
+    else if (en)        InstrD <= InstrF;
+  end
 
 endmodule
 
@@ -684,17 +701,18 @@ end
 endmodule
 
 // Telling for stall
-module stalltell(input logic [4:0] rs1D, rs2D,
+// also stall for branch
+module hazardunit(input logic [4:0] rs1D, rs2D,
                  input logic [4:0] rdE,
-                 input logic       ResultSrcE0,
+                 input logic       ResultSrcE0, PCSrcE,
                   
-                 output logic      StallF, StallD, FlushE);
+                 output logic      StallF, StallD, FlushD, FlushE);
 
 logic loadStall;
 assign loadStall = ResultSrcE0 & ((rs1D == rdE) | (rs2D == rdE));
 assign StallF = loadStall;
 assign StallD = loadStall;
-assign FlushE = loadStall;
+assign FlushE = loadStall | PCSrcE;
+assign FlushD = PCSrcE;
 
 endmodule
-

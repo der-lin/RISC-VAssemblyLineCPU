@@ -487,3 +487,8 @@ stalltell  stalltell(InstrD[19:15], InstrD[24:20], rdE, ResultSrcE[0], StallF, S
 ### The Control Hazard
 
 A control hazard occurs when the decision of what instruction to fetch next has not been made by the time the fetch takes place.
+
+The beq instruction presents a control hazard: the pipelined processor does not know what instruction to fetch next because the branch decision has not been made by the time the next instruction is fetched.
+
+* To deal this hazard, I choose the `branch prediction`. It means we will `Flush` the control signals in if->id and id->exe.So, we can get the logic:
+* `FlushD` = `PCSrcE`; `FlushE` = `loadStall | PCSrcE`;
