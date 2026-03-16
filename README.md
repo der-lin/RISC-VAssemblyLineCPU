@@ -439,6 +439,7 @@ endmodule
 A data hazard occurs when an instruction tries to read a register that has not yet been written back by a previous instruction.
 
 * **1. Solving Data Hazards with Forwarding**
+
 Some data hazards can be solved by forwarding(also called bypassing) a result from the `Memory` or `Write Back` stage to a dependent instruction in the `Execute` stage. This requires adding multiplexers `in front of the ALU` to select its operands from the register file or the Mem or WB stage.
 From my perspective, forwarding is necessary when an instruction in Exe has a source register matching the destination register of an instruction in Mem or WB.To support forwarding, we can add `Hazard Unit` and `two forwarding multiplexers` as the picture in the book named DDCA.
 The hazard detection unit receives the two source registers from the instruction in Exe, `Rs1E` and `Rs2E`, and the destination registers from the instructions in Mem and WB, `RdM` and `RdW`. Of course, it also receive the `RegWrite` signals from the Mem and WB stages (RegWriteM and RegWriteW) to know whether the destination register will actually be written (take sw and beq for example, their instructions do not write results to register file and, hence, do not have their results forwarded).
@@ -446,11 +447,42 @@ The hazard unit computes control signals for the forwarding multiplexers to choo
 And remember that `x0` is hardwired to 0 and should never be forwarded.
 What's more, the result from Mem has a priority comparing with that from WB because we need a `recent` data.
 All in all, we get the telling-logic for forwarding as follows:
-if      `((Rs1E == RdM) & RegWriteM) & (Rs1E != 0)`, then ForwardAE = 2'b10  // Forward from Mem Stage
-else if `((Rs1E == RdW) & RegWriteW) & (Rs1E != 0)`, then ForwardAE = 2'b01  // Forward from WB Stage
-else                                               , then ForwardAE = 2'b00  // No forwarding
+* if      `((Rs1E == RdM) & RegWriteM) & (Rs1E != 0)`, then ForwardAE = 2'b10  // Forward from Mem Stage
+* else if `((Rs1E == RdW) & RegWriteW) & (Rs1E != 0)`, then ForwardAE = 2'b01  // Forward from WB Stage
+* else                                               , then ForwardAE = 2'b00  // No forwarding
 
 * `the simultaneity of transimmion`: think about instructions:addi x1, x2, x3; sw x1, 0(x4): sw instruction will get the forwarding result from Mem of addi in Exe, and we should pass the result to Mem stage. So, we change `exe_mem(...ReadData2E...)` to `exe_mem(...ForwardSrcBE...)`.
+
+* **2. Solving Data Hazards with Stalls**
+
+Forwarding is sufficient to solve `RAW` data hazards when the result is computed in the Execute stage of an instruction because ist result can be then be forwarded to Exe of the next instruction. Unforunately, the `lw` instruction does not finish reading data until `the end of the Memory stage`, so its result cannot be forwarded to the Exe of the next instruction.
+Consider the following instructions:
+```assemble
+lw  s7, 40(s5)
+and s8, s7, t3
+```
+`To solve the problem that data readed from the end of the cycle will be used in the begining of the current cycle`, we can `stall` the pipeline, holding up operation until the data is available.
+Stalls degrade performance, so they should be used only when necessray.
+In conclusion, we get the logic to compute the stalls and flushes as follows:
+* `loadStall` = `ResultSrcE[0] & ((Rs1D == RdE) | (Rs2D) == RdE)`
+* `StallF` = `StallD` = `FlushE` = `loadStall`
+`StallF` and `StallD` freeze PCreg and IF->IDreg, respectively. `FlushE` will make the control signals from ID to Exe become `zero` to make sure no registers will get a data. Therefore, with the cooperation of these three signals, the instruction using source register which is the destination regiter of load-instruction and instructions after it will be `stopped`.
+```systemverilog
+// in riscvpipeline
+// IF
+//...
+flopren #(32) pcreg(clk, reset, ~StallF, PCNextF, PC);
+//...
+//ID
+//...
+stalltell  stalltell(InstrD[19:15], InstrD[24:20], rdE, ResultSrcE[0], StallF, StallD, FlushE);
+//...
+
+// add en = ~StallD into if_id-module
+
+// add clear = FlushE into id_exe-module
+
+```
 
 ### The Control Hazard
 

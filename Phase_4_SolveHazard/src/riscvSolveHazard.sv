@@ -65,6 +65,7 @@ module riscvpipeline(input  logic        clk, reset,
 // IF Stage
 logic [31:0] PCNextF, PCPlus4F;  // PCTarget is putted in the Exe stage
 logic        PCSrcE;
+logic        StallF;
 
 // ID Stage
 logic [31:0] PCD, PCPlus4D, InstrD;
@@ -75,6 +76,7 @@ logic [3:0]  ALUControlD;
 logic [31:0] ReadData1D, SrcAD, ReadData2D, ImmExtD; //PCTargetD; For now, let's design it in a simple pipeline
 logic [1:0]  SrcASrcD; // For auipc and lui, we need to select the source of SrcA, which can be either zero or PC.
 logic        JumpRegD; // For jalr, we need to set the JumpReg signal to 1. And the selection use this signal in Exe.
+logic        StallD;
 
 // EXE Stage
 logic [31:0] SrcAE, ReadData2E, ImmExtE, PCPlus4E, PCE;
@@ -91,7 +93,8 @@ logic [2:0]  funct3E;      // For telling B-type instructions in details.
 logic        BranchTaken;
 logic [31:0] JalrTargetE;  // To align the address.
 logic [4:0]  ForwardAE, ForwardBE;
-logic [31:0] ForwardSrcAE, ForwardSrcBE;  
+logic [31:0] ForwardSrcAE, ForwardSrcBE;
+logic        FlushE;  
 
 // MEM Stage
 logic [31:0] ALUResultM, ReadDataM, PCPlus4M, WriteDataM;
@@ -110,11 +113,11 @@ logic [31:0] LReadDataW;  // For load instructions
 logic [2:0]  funct3W;     // For telling load instructions in details, such as lb, lh and lw.
 
 // --- Pipeline ---
-if_id if_id(clk, reset,
+if_id if_id(clk, reset, ~StallD,
              PC, PCPlus4F, Instr,
              PCD, PCPlus4D, InstrD);
 
-id_exe id_exe(clk, reset,
+id_exe id_exe(clk, reset, FlushE,
               ResultSrcD, ALUSrcD, RegWriteD, MemWriteD, JumpD, BranchD,
               ALUControlD,
               SrcAD, ReadData2D, PCD, ImmExtD, PCPlus4D,
@@ -156,7 +159,7 @@ mem_wb mem_wb(clk, reset,
               funct3W);
 
 // --- IF ---
-flopr #(32) pcreg(clk, reset, PCNextF, PC);
+flopren #(32) pcreg(clk, reset, ~StallF, PCNextF, PC);
 adder       pcadd4(PC, 32'd4, PCPlus4F);
 mux2 #(32)  pcmux(PCPlus4F, PCTargetE, PCSrcE, PCNextF);
 
@@ -171,6 +174,7 @@ extend      ext(InstrD[31:7], ImmSrcD, ImmExtD);
 // For auipc and lui, we need to select the source of SrcA, which can be either zero or PC.
 // When SrcASrcD is 00, SrcAD = SrcA; When SrcASrcD is 01, SrcAD = 0; When SrcASrcD is 10, SrcAD = PCD. 
 mux3 #(32) srcamux(ReadData1D, 32'b0, PCD, SrcASrcD, SrcAD);
+stalltell  stalltell(InstrD[19:15], InstrD[24:20], rdE, ResultSrcE[0], StallF, StallD, FlushE);
 
 // --- EXE ---
 forwarding  forwarding(rs1E, rs2E, rdM, rdW, RegWriteM, RegWriteW,
@@ -374,6 +378,27 @@ module flopr #(parameter WIDTH = 8)
     else       q <= d;
 endmodule
 
+module flopren #(parameter WIDTH = 8)
+                (input  logic             clk, reset, en,
+                 input  logic [WIDTH-1:0] d,
+                 output logic [WIDTH-1:0] q);
+
+always_ff @(posedge clk, posedge reset)
+    if (reset)   q <= 0;
+    else if (en) q <= d; // write new data if en = 1; freeze the data if en = 0
+endmodule
+
+module floprc #(parameter WIDTH = 8)
+             (input  logic             clk, reset, clear,
+              input  logic [WIDTH-1:0] d, 
+              output logic [WIDTH-1:0] q);
+
+  always_ff @(posedge clk, posedge reset)
+    if (reset)      q <= 0;
+    else if (clear) q <= 0; // if clear = 1, forced to clear
+    else            q <= d;
+endmodule
+
 module mux2 #(parameter WIDTH = 8)
              (input  logic [WIDTH-1:0] d0, d1, 
               input  logic             s, 
@@ -467,18 +492,18 @@ module alu(input  logic [31:0] a, b,
 endmodule
 
 // IF->ID pipeline register
-module if_id(input  logic        clk, reset,
+module if_id(input  logic        clk, reset, en,
              input  logic [31:0] PCF, PCPlus4F, InstrF,
              output logic [31:0] PCD, PCPlus4D, InstrD);
 
-  flopr #(32) pc_if_id(clk, reset, PCF, PCD);
-  flopr #(32) pcplus4_if_id(clk, reset, PCPlus4F, PCPlus4D);
-  flopr #(32) instr_if_id(clk, reset, InstrF, InstrD);
+  flopren #(32) pc_if_id(clk, reset, en, PCF, PCD);
+  flopren #(32) pcplus4_if_id(clk, reset, en, PCPlus4F, PCPlus4D);
+  flopren #(32) instr_if_id(clk, reset, en, InstrF, InstrD);
 
 endmodule
 
 // ID->Exe pipeline register
-module id_exe(input logic        clk, reset,
+module id_exe(input logic        clk, reset, clear,
               // Control Signals
               input logic [1:0]  ResultSrcD,
               input logic        ALUSrcD, RegWriteD, MemWriteD, JumpD, BranchD,
@@ -499,13 +524,13 @@ module id_exe(input logic        clk, reset,
               output logic [2:0]  funct3E);
 
   // Control
-  flopr #(2)   resultsrc_id_exe(clk, reset, ResultSrcD, ResultSrcE);
-  flopr #(1)   alusrc_id_exe(clk, reset, ALUSrcD, ALUSrcE);
-  flopr #(1)   regwrite_id_exe(clk, reset, RegWriteD, RegWriteE);
-  flopr #(1)   memwrite_id_exe(clk, reset, MemWriteD, MemWriteE);
-  flopr #(1)   jump_id_exe(clk, reset, JumpD, JumpE);
-  flopr #(1)   branch_id_exe(clk, reset, BranchD, BranchE);
-  flopr #(4)   alucontrol_id_exe(clk, reset, ALUControlD, ALUControlE);
+  floprc #(2)   resultsrc_id_exe(clk, reset, clear, ResultSrcD, ResultSrcE);
+  floprc #(1)   alusrc_id_exe(clk, reset, clear, ALUSrcD, ALUSrcE);
+  floprc #(1)   regwrite_id_exe(clk, reset, clear, RegWriteD, RegWriteE);
+  floprc #(1)   memwrite_id_exe(clk, reset, clear, MemWriteD, MemWriteE);
+  floprc #(1)   jump_id_exe(clk, reset, clear, JumpD, JumpE);
+  floprc #(1)   branch_id_exe(clk, reset, clear, BranchD, BranchE);
+  floprc #(4)   alucontrol_id_exe(clk, reset, clear, ALUControlD, ALUControlE);
   // Data
   flopr #(32) srca_id_exe(clk, reset, SrcAD, SrcAE);
   flopr #(32) readdata2_id_exe(clk, reset, ReadData2D, ReadData2E);
@@ -657,3 +682,19 @@ always_comb begin
 end
 
 endmodule
+
+// Telling for stall
+module stalltell(input logic [4:0] rs1D, rs2D,
+                 input logic [4:0] rdE,
+                 input logic       ResultSrcE0,
+                  
+                 output logic      StallF, StallD, FlushE);
+
+logic loadStall;
+assign loadStall = ResultSrcE0 & ((rs1D == rdE) | (rs2D == rdE));
+assign StallF = loadStall;
+assign StallD = loadStall;
+assign FlushE = loadStall;
+
+endmodule
+
