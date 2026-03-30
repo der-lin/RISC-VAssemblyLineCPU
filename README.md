@@ -492,3 +492,7 @@ The beq instruction presents a control hazard: the pipelined processor does not 
 
 * To deal this hazard, I choose the `branch prediction`. It means we will `Flush` the control signals in if->id and id->exe.So, we can get the logic:
 * `FlushD` = `PCSrcE`; `FlushE` = `loadStall | PCSrcE`;
+
+## The Phase Five: Justifying
+
+Because the `auipc` instruction will cause the `wrong forwarding`, we add a signal `SrcASrcE = SrcASrcD` to solve the problem. (SrcASrc = 2'b10 means auipc, SrcASrc = 2'b01 means lui and SrcASrc = 2'b00 means normal based on the `aludec`). 
