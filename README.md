@@ -495,4 +495,20 @@ The beq instruction presents a control hazard: the pipelined processor does not 
 
 ## The Phase Five: Justifying
 
-Because the `auipc` instruction will cause the `wrong forwarding`, we add a signal `SrcASrcE = SrcASrcD` to solve the problem. (SrcASrc = 2'b10 means auipc, SrcASrc = 2'b01 means lui and SrcASrc = 2'b00 means normal based on the `aludec`). 
+Because the `auipc` instruction will cause the `wrong forwarding`, we add a signal `SrcASrcE = SrcASrcD` to solve the problem. (SrcASrc = 2'b10 means auipc, SrcASrc = 2'b01 means lui and SrcASrc = 2'b00 means normal based on the `aludec`).
+
+## The Phase Six: FPGA Implementation
+
+### Modify the original FPGA configuration files
+
+As the words from ppt, we know we must modify the original FPGA configuration files: `RVCPUSOC_Top.v` , `dm.v` and `MIO_BUS.v`
+
+* `RVCPUSOC_Top.v`: The salient change is that change the `riscvsingle U_CPU()` to `riscvpipeline U_CPU()`:
+  1. To satisfy the `Store Word, Store Half and Store Byte`, we add `funct3M` to riscvpipeline U_CPU(). Don't foget to write `wire [2:0] funct3M;` into module RVCPUSOC_TOP.
+* `dm.v`: There are two key-points on the todo list:
+  1. Improve the logic within `dm` by mimicking the source code files, thereby ensuring the implementation of `store byte` and `store half`.
+  2. Change the address passed to dm to `cpu_data_addr` because `ram_addr` = `cpu_data_addr[8:2]` will miss the `offset` information. And the way we take to cope with the problem is to past `cpu_data_addr[1:0]` as addr_lsb (offset) into dm.
+* `MIO_BUS.v`: Nothing has be changed.
+
+**You must remember to reset `cpu_data_addr[8:2] and [6:0]ram_addr` in `MIO_BUS.v`, `RAM[127:0] and [8:2] word_addr` in `dm.v` and `[6:0] ram_addr ` in RVCPUSOC_Top.v when you need to use a new width(depth) of memory**(Maybe I overlooked something).
+
