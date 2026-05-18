@@ -512,3 +512,6 @@ As the words from ppt, we know we must modify the original FPGA configuration fi
 
 **You must remember to reset `cpu_data_addr[8:2] and [6:0]ram_addr` in `MIO_BUS.v`, `RAM[127:0] and [8:2] word_addr` in `dm.v` and `[6:0] ram_addr ` in RVCPUSOC_Top.v when you need to use a new width(depth) of memory**(Maybe I overlooked something).
 
+### The Phase Seven: FPGA Implementation
+
+### The Phase Eight: Interrupt / Exception / Syscall
